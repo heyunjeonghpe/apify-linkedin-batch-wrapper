@@ -1,104 +1,181 @@
-import { Actor, log } from 'apify';
+import { Actor } from 'apify';
+import { PlaywrightCrawler, log } from 'crawlee';
 
 await Actor.init();
 
-const input = await Actor.getInput() || {};
+const input = (await Actor.getInput()) ?? {};
 
 const {
-  profileUrls = [],
-  batchSize = 5,
-  maxPostsPerProfile = 15,
-  includeReposts = false,
-  onlyPosts = true,
-  dedupeByPostUrl = true,
-  debug = false,
+    profileUrls = [],
+    maxPostsPerProfile = 10,
+    maxScrolls = 8,
+    includeReposts = false,
+    debug = false,
+    loginCookiesJson = '',
 } = input;
 
 if (!Array.isArray(profileUrls) || profileUrls.length === 0) {
-  throw new Error('Missing required input: profileUrls must be a non-empty array');
+    throw new Error('Missing required input: profileUrls must be a non-empty array');
 }
 
-const client = Actor.newClient();
-
-function chunk(arr, size) {
-  const out = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
+let cookies = [];
+if (loginCookiesJson) {
+    try {
+        cookies = typeof loginCookiesJson === 'string'
+            ? JSON.parse(loginCookiesJson)
+            : loginCookiesJson;
+    } catch (err) {
+        throw new Error(`loginCookiesJson is not valid JSON: ${err.message}`);
+    }
 }
 
-function buildTaskInput(batch) {
-  return {
-    startUrls: batch.map(url => ({ url })),
-    maxItems: maxPostsPerProfile,
-    includeReposts: false
-  };
+function toRecentActivityUrl(url) {
+    const clean = url.trim().replace(/\/+$/, '');
+    if (clean.includes('/recent-activity/')) return clean;
+    return `${clean}/recent-activity/all/`;
 }
 
-function normalizeItem(item, fallbackProfile) {
-  // Tries several common field names returned by LinkedIn scraping actors.
-  const postUrl = item.postUrl || item.url || item.activityUrl || null;
-  const text = item.text || item.content || item.description || item.headline || '';
-  const authorName = item.authorName || item.author || item.profileName || null;
-  const authorUrl = item.authorUrl || item.profileUrl || fallbackProfile || null;
-  const timestamp = item.timestamp || item.postedAt || item.date || null;
-  const postType = item.postType || item.type || null;
-  const imageUrl = item.imageUrl || item.image || null;
-  const sourceProfile = item.sourceProfile || fallbackProfile || null;
-
-  return {
-    sourceProfile,
-    authorName,
-    authorUrl,
-    text,
-    headline: item.headline || text,
-    postUrl,
-    postType,
-    timestamp,
-    imageUrl,
-    raw: item,
-  };
+function normalizeUrl(url) {
+    if (!url) return null;
+    if (url.startsWith('http')) return url;
+    if (url.startsWith('/')) return `https://www.linkedin.com${url}`;
+    return url;
 }
 
-const batches = chunk(profileUrls, batchSize);
-const allNormalized = [];
-const seen = new Set();
+function parseRelativeTimestamp(raw) {
+    if (!raw || typeof raw !== 'string') return null;
 
-log.info(`Starting wrapper for ${profileUrls.length} profiles in ${batches.length} batch(es).`);
+    const text = raw.trim().toLowerCase();
 
-for (let idx = 0; idx < batches.length; idx++) {
-  const batch = batches[idx];
-  const taskInput = buildTaskInput(batch);
+    // Try explicit date first
+    const explicit = new Date(raw);
+    if (!Number.isNaN(explicit.getTime())) return explicit.toISOString();
 
-  if (debug) {
-    log.info(`Calling source task for batch ${idx + 1}/${batches.length}`, { batch, taskInput });
-  }
+    // Handle relative strings like 2h, 3d, 1w, 4mo
+    const match = text.match(/^(\d+)\s*(m|h|d|w|mo|y)$/i);
+    if (!match) return null;
 
-  const run = await Actor.call('parseforge/linkedin-posts-scraper', taskInput);
+    const value = Number(match[1]);
+    const unit = match[2].toLowerCase();
 
-  if (!run?.defaultDatasetId) {
-    throw new Error(`Source task run for batch ${idx + 1} did not return defaultDatasetId`);
-  }
+    const now = new Date();
 
-  const { items } = await client.dataset(run.defaultDatasetId).listItems({ clean: true });
+    switch (unit) {
+        case 'm':
+            now.setMinutes(now.getMinutes() - value);
+            break;
+        case 'h':
+            now.setHours(now.getHours() - value);
+            break;
+        case 'd':
+            now.setDate(now.getDate() - value);
+            break;
+        case 'w':
+            now.setDate(now.getDate() - value * 7);
+            break;
+        case 'mo':
+            now.setMonth(now.getMonth() - value);
+            break;
+        case 'y':
+            now.setFullYear(now.getFullYear() - value);
+            break;
+        default:
+            return null;
+    }
 
-  if (debug) {
-    log.info(`Fetched ${items.length} raw item(s) from source dataset`, { datasetId: run.defaultDatasetId });
-  }
-
-  // Try to backfill sourceProfile if the source task didn't return it.
-  const batchFallbackProfile = batch.length === 1 ? batch[0] : null;
-
-  for (const rawItem of items) {
-    const normalized = normalizeItem(rawItem, batchFallbackProfile);
-    const dedupeKey = normalized.postUrl || `${normalized.authorName || 'unknown'}::${normalized.text || ''}`;
-
-    if (dedupeByPostUrl && seen.has(dedupeKey)) continue;
-    if (dedupeByPostUrl) seen.add(dedupeKey);
-
-    allNormalized.push(normalized);
-  }
+    return now.toISOString();
 }
 
-log.info(`Pushing ${allNormalized.length} normalized item(s) to wrapper dataset.`);
-await Actor.pushData(allNormalized);
-await Actor.exit();
+function dedupePosts(posts) {
+    const seen = new Set();
+    const result = [];
+
+    for (const post of posts) {
+        const key =
+            post.postUrl ||
+            `${post.authorName || 'unknown'}::${post.text || post.headline || ''}`;
+
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(post);
+    }
+
+    return result;
+}
+
+const requests = profileUrls.map((profileUrl) => ({
+    url: toRecentActivityUrl(profileUrl),
+    userData: { sourceProfile: profileUrl },
+}));
+
+log.info(`Starting self-contained LinkedIn scrape for ${requests.length} profile(s).`);
+
+const crawler = new PlaywrightCrawler({
+    maxConcurrency: 2,
+    requestHandlerTimeoutSecs: 180,
+    navigationTimeoutSecs: 90,
+    maxRequestRetries: 1,
+
+    launchContext: {
+        launchOptions: {
+            headless: true,
+        },
+    },
+
+    async preNavigationHooks([{ page }, gotoOptions]) {
+        gotoOptions.waitUntil = 'domcontentloaded';
+
+        if (cookies.length > 0) {
+            await page.context().addCookies(cookies);
+        }
+    },
+
+    async requestHandler({ page, request }) {
+        const { sourceProfile } = request.userData;
+
+        await page.waitForTimeout(2500);
+
+        let collected = [];
+
+        for (let i = 0; i < maxScrolls; i++) {
+            const posts = await page.evaluate(({ includeReposts }) => {
+                const textOf = (el) => (el?.innerText || el?.textContent || '').trim();
+
+                const cardSelector = [
+                    'div.feed-shared-update-v2',
+                    'article',
+                    'div[data-id^="urn:li:activity"]',
+                ].join(',');
+
+                const cards = Array.from(document.querySelectorAll(cardSelector));
+
+                const extracted = cards.map((card) => {
+                    const authorName =
+                        textOf(
+                            card.querySelector(
+                                '.update-components-actor__name, .feed-shared-actor__name, .update-components-actor__title'
+                            )
+                        ) || null;
+
+                    const text =
+                        textOf(
+                            card.querySelector(
+                                '.update-components-text, .feed-shared-inline-show-more-text, .break-words, [data-test-id="main-feed-activity-card__commentary"]'
+                            )
+                        ) || '';
+
+                    const headline =
+                        textOf(
+                            card.querySelector(
+                                '.update-components-text, .feed-shared-inline-show-more-text'
+                            )
+                        ) || text;
+
+                    const timestampRaw =
+                        textOf(
+                            card.querySelector(
+                                '.update-components-actor__sub-description span[aria-hidden="true"], .feed-shared-actor__sub-description span[aria-hidden="true"], time'
+                            )
+                        ) || null;
+
+                    const postAnchor = card.querySelector(
