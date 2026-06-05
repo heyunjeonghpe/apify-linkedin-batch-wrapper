@@ -7,8 +7,8 @@ const input = (await Actor.getInput()) ?? {};
 
 const {
     profileUrls = [],
-    maxPostsPerProfile = 10,
-    maxScrolls = 8,
+    maxPostsPerProfile = 5,
+    maxScrolls = 4,
     includeReposts = false,
     debug = false,
     loginCookiesJson = '',
@@ -25,22 +25,24 @@ if (loginCookiesJson) {
             ? JSON.parse(loginCookiesJson)
             : loginCookiesJson;
 
-        cookies = parsed.map((cookie) => {
-            const normalized = {
-                name: cookie.name,
-                value: cookie.value,
-                domain: (cookie.domain || '.linkedin.com').replace(/^\.?www\./, '.'),
-                path: cookie.path || '/',
-                secure: Boolean(cookie.secure),
-                httpOnly: Boolean(cookie.httpOnly),
-            };
+        cookies = parsed
+            .filter((c) => ['li_at', 'JSESSIONID', 'bcookie', 'lidc'].includes(c.name))
+            .map((cookie) => {
+                const normalized = {
+                    name: cookie.name,
+                    value: cookie.value,
+                    domain: '.linkedin.com',
+                    path: cookie.path || '/',
+                    secure: Boolean(cookie.secure),
+                    httpOnly: Boolean(cookie.httpOnly),
+                };
 
-            if (cookie.sameSite && ['Strict', 'Lax', 'None'].includes(cookie.sameSite)) {
-                normalized.sameSite = cookie.sameSite;
-            }
+                if (cookie.sameSite && ['Strict', 'Lax', 'None'].includes(cookie.sameSite)) {
+                    normalized.sameSite = cookie.sameSite;
+                }
 
-            return normalized;
-        });
+                return normalized;
+            });
     } catch (err) {
         throw new Error(`loginCookiesJson is not valid JSON: ${err.message}`);
     }
@@ -64,17 +66,14 @@ function parseRelativeTimestamp(raw) {
 
     const text = raw.trim().toLowerCase();
 
-    // Try explicit date first
     const explicit = new Date(raw);
     if (!Number.isNaN(explicit.getTime())) return explicit.toISOString();
 
-    // Handle relative strings like 2h, 3d, 1w, 4mo
     const match = text.match(/^(\d+)\s*(m|h|d|w|mo|y)$/i);
     if (!match) return null;
 
     const value = Number(match[1]);
     const unit = match[2].toLowerCase();
-
     const now = new Date();
 
     switch (unit) {
@@ -127,11 +126,24 @@ const requests = profileUrls.map((profileUrl) => ({
 
 log.info(`Starting self-contained LinkedIn scrape for ${requests.length} profile(s).`);
 
+// ***** IMPORTANT: use Apify Residential Proxy *****
+const proxyConfiguration = await Actor.createProxyConfiguration({
+    groups: ['RESIDENTIAL'],
+    countryCode: 'US',
+});
+
 const crawler = new PlaywrightCrawler({
+    proxyConfiguration,
     maxConcurrency: 1,
-    requestHandlerTimeoutSecs: 180,
-    navigationTimeoutSecs: 90,
     maxRequestRetries: 2,
+    requestHandlerTimeoutSecs: 240,
+    navigationTimeoutSecs: 120,
+
+    useSessionPool: true,
+    persistCookiesPerSession: true,
+    sessionPoolOptions: {
+        maxPoolSize: 20,
+    },
 
     launchContext: {
         launchOptions: {
@@ -140,19 +152,43 @@ const crawler = new PlaywrightCrawler({
     },
 
     preNavigationHooks: [
-    async ({ page }, gotoOptions) => {
-        gotoOptions.waitUntil = 'domcontentloaded';
+        async ({ page, session }, gotoOptions) => {
+            gotoOptions.waitUntil = 'domcontentloaded';
 
-        if (cookies.length > 0) {
-            await page.context().addCookies(cookies);
-        }
-    }
-],
+            // add cookies before navigation
+            if (cookies.length > 0) {
+                await page.context().addCookies(cookies);
+            }
 
-    async requestHandler({ page, request }) {
+            await page.setExtraHTTPHeaders({
+                'accept-language': 'en-US,en;q=0.9',
+                'upgrade-insecure-requests': '1',
+            });
+
+            if (debug) {
+                log.info('Prepared page before navigation', {
+                    sessionId: session?.id,
+                    cookieCount: cookies.length,
+                });
+            }
+        },
+    ],
+
+    async requestHandler({ page, request, session }) {
         const { sourceProfile } = request.userData;
 
+        // give the page time to settle
         await page.waitForTimeout(5000);
+
+        // If LinkedIn redirected to login/checkpoint, don't proceed
+        const currentUrl = page.url();
+        if (
+            currentUrl.includes('/login') ||
+            currentUrl.includes('/checkpoint/') ||
+            currentUrl.includes('/authwall')
+        ) {
+            throw new Error(`LinkedIn redirected to auth/checkpoint for ${sourceProfile}: ${currentUrl}`);
+        }
 
         let collected = [];
 
@@ -179,96 +215,3 @@ const crawler = new PlaywrightCrawler({
                     const text =
                         textOf(
                             card.querySelector(
-                                '.update-components-text, .feed-shared-inline-show-more-text, .break-words, [data-test-id="main-feed-activity-card__commentary"]'
-                            )
-                        ) || '';
-
-                    const headline =
-                        textOf(
-                            card.querySelector(
-                                '.update-components-text, .feed-shared-inline-show-more-text'
-                            )
-                        ) || text;
-
-                    const timestampRaw =
-                        textOf(
-                            card.querySelector(
-                                '.update-components-actor__sub-description span[aria-hidden="true"], .feed-shared-actor__sub-description span[aria-hidden="true"], time'
-                            )
-                        ) || null;
-
-                    const postAnchor = card.querySelector(
-                        'a.app-aware-link[href*="/posts/"], a.app-aware-link[href*="/feed/update/"]'
-                    );
-                    const postUrl = postAnchor?.getAttribute('href') || null;
-
-                    const imageEl = card.querySelector('img');
-                    const imageUrl = imageEl?.getAttribute('src') || null;
-
-                    const fullText = card.innerText || '';
-                    const isRepost =
-                        /reposted this|shared this|repost/i.test(fullText);
-
-                    return {
-                        authorName,
-                        text,
-                        headline,
-                        timestampRaw,
-                        postUrl,
-                        imageUrl,
-                        isRepost,
-                    };
-                });
-
-                return extracted.filter((item) => {
-                    if (!includeReposts && item.isRepost) return false;
-                    return Boolean(item.text || item.headline || item.postUrl);
-                });
-            }, { includeReposts });
-
-            collected = dedupePosts([...collected, ...posts]);
-
-            if (debug) {
-                log.info(`Collected ${collected.length} raw post(s) so far`, {
-                    profile: sourceProfile,
-                    scrollIndex: i + 1,
-                });
-            }
-
-            if (collected.length >= maxPostsPerProfile) break;
-
-            await page.mouse.wheel(0, 5000);
-            await page.waitForTimeout(3500);
-        }
-
-        const normalized = dedupePosts(
-            collected.slice(0, maxPostsPerProfile).map((item) => ({
-                sourceProfile,
-                authorName: item.authorName,
-                authorUrl: sourceProfile,
-                text: item.text || '',
-                headline: item.headline || item.text || '',
-                postUrl: normalizeUrl(item.postUrl),
-                postType: 'post',
-                timestamp: parseRelativeTimestamp(item.timestampRaw),
-                rawTimestamp: item.timestampRaw,
-                imageUrl: item.imageUrl,
-                raw: item,
-            }))
-        );
-
-        if (debug) {
-            log.info(`Pushing ${normalized.length} normalized post(s)`, {
-                profile: sourceProfile,
-            });
-        }
-
-        if (normalized.length > 0) {
-            await Actor.pushData(normalized);
-        }
-    },
-});
-
-await crawler.run(requests);
-
-await Actor.exit();
