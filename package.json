@@ -2,12 +2,13 @@
   "name": "linkedin-batch-wrapper",
   "version": "1.0.0",
   "type": "module",
-  "description": "LinkedIn batch wrapper actor",
+  "description": "Self-contained LinkedIn scraper wrapper actor",
   "main": "src/main.js",
   "scripts": {
     "start": "node src/main.js"
   },
   "dependencies": {
-    "apify": "^3.4.0"
+    "apify": "^3.4.0",
+    "crawlee": "^3.16.0"
   }
 }
