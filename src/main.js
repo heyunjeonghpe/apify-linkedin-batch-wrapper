@@ -3,8 +3,8 @@ import { Actor, log } from 'apify';
 await Actor.init();
 
 const input = await Actor.getInput() || {};
+
 const {
-  actorTaskId,
   profileUrls = [],
   batchSize = 5,
   maxPostsPerProfile = 15,
@@ -13,10 +13,6 @@ const {
   dedupeByPostUrl = true,
   debug = false,
 } = input;
-
-if (!actorTaskId) {
-  throw new Error('Missing required input: actorTaskId');
-}
 
 if (!Array.isArray(profileUrls) || profileUrls.length === 0) {
   throw new Error('Missing required input: profileUrls must be a non-empty array');
