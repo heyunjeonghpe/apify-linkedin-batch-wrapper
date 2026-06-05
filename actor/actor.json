@@ -1,9 +1,0 @@
-{
-  "actorSpecification": 1,
-  "name": "linkedin-batch-wrapper",
-  "title": "LinkedIn Batch Wrapper",
-  "description": "Batch wrapper that calls LinkedIn posts scraper and merges results",
-  "version": "1.0",
-  "dockerfile": "./Dockerfile",
-  "input": "./input_schema.json"
-}
