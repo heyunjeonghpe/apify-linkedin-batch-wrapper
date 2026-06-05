@@ -1,43 +1,36 @@
 {
   "title": "LinkedIn Batch Wrapper Input",
+  "description": "Input for LinkedIn batch wrapper actor",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
     "profileUrls": {
-      "title": "LinkedIn profile URLs",
+      "title": "LinkedIn Profile URLs",
+      "description": "List of LinkedIn profiles to scrape",
       "type": "array",
+      "items": {
+        "type": "string"
+      },
       "editor": "stringList"
     },
     "batchSize": {
-      "title": "Batch size",
+      "title": "Batch Size",
+      "description": "Number of profiles per batch",
       "type": "integer",
       "default": 5
     },
     "maxPostsPerProfile": {
-      "title": "Max posts per profile",
+      "title": "Max Posts Per Profile",
+      "description": "Maximum number of posts to collect per profile",
       "type": "integer",
       "default": 12
     },
     "includeReposts": {
-      "title": "Include reposts",
+      "title": "Include Reposts",
+      "description": "Whether to include reposts",
       "type": "boolean",
       "default": false
     },
     "onlyPosts": {
-      "title": "Only posts",
-      "type": "boolean",
-      "default": true
-    },
-    "dedupeByPostUrl": {
-      "title": "Deduplicate posts",
-      "type": "boolean",
-      "default": true
-    },
-    "debug": {
-      "title": "Enable debug logs",
-      "type": "boolean",
-      "default": false
-    }
-  },
-  "required": ["profileUrls"]
-}
+      "title": "Only Posts",
+      "description": "Only include original posts",
