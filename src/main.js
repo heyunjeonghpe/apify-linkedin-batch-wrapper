@@ -122,13 +122,15 @@ const crawler = new PlaywrightCrawler({
         },
     },
 
-    async preNavigationHooks([{ page }, gotoOptions]) {
+    preNavigationHooks: [
+    async ({ page }, gotoOptions) => {
         gotoOptions.waitUntil = 'domcontentloaded';
 
         if (cookies.length > 0) {
             await page.context().addCookies(cookies);
         }
-    },
+    }
+],
 
     async requestHandler({ page, request }) {
         const { sourceProfile } = request.userData;
