@@ -1,9 +1,9 @@
 {
-  "name": "apify-linkedin-batch-wrapper",
+  "name": "linkedin-batch-wrapper",
   "version": "1.0.0",
-  "private": true,
   "type": "module",
-  "description": "Batch wrapper actor that calls an existing Apify LinkedIn scraping task across many LinkedIn profiles and returns normalized dataset items.",
+  "description": "LinkedIn batch wrapper actor",
+  "main": "src/main.js",
   "scripts": {
     "start": "node src/main.js"
   },
