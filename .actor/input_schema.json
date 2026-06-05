@@ -4,30 +4,37 @@
   "schemaVersion": 1,
   "properties": {
     "profileUrls": {
+      "title": "LinkedIn profile URLs",
       "type": "array",
       "editor": "stringList"
     },
     "batchSize": {
+      "title": "Batch size",
       "type": "integer",
       "default": 5
     },
     "maxPostsPerProfile": {
+      "title": "Max posts per profile",
       "type": "integer",
       "default": 12
     },
     "includeReposts": {
+      "title": "Include reposts",
       "type": "boolean",
       "default": false
     },
     "onlyPosts": {
+      "title": "Only posts",
       "type": "boolean",
       "default": true
     },
     "dedupeByPostUrl": {
+      "title": "Deduplicate posts",
       "type": "boolean",
       "default": true
     },
     "debug": {
+      "title": "Enable debug logs",
       "type": "boolean",
       "default": false
     }
