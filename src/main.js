@@ -32,17 +32,16 @@ function chunk(arr, size) {
 
 function buildTaskInput(batch) {
   return {
-    profileUrls: batch,
-    maxPosts: maxPostsPerProfile,
-    includeReposts,
-    onlyPosts,
+    startUrls: batch.map(url => ({ url })),
+    maxItems: maxPostsPerProfile,
+    includeReposts: false
   };
 }
 
 function normalizeItem(item, fallbackProfile) {
   // Tries several common field names returned by LinkedIn scraping actors.
   const postUrl = item.postUrl || item.url || item.activityUrl || null;
-  const text = item.text || item.content || item.postText || item.headline || '';
+  const text = item.text || item.content || item.description || item.headline || '';
   const authorName = item.authorName || item.author || item.profileName || null;
   const authorUrl = item.authorUrl || item.profileUrl || fallbackProfile || null;
   const timestamp = item.timestamp || item.postedAt || item.date || null;
@@ -78,7 +77,7 @@ for (let idx = 0; idx < batches.length; idx++) {
     log.info(`Calling source task for batch ${idx + 1}/${batches.length}`, { batch, taskInput });
   }
 
-  const run = await client.task(actorTaskId).call(taskInput);
+  const run = await Actor.call('parseforge/linkedin-posts-scraper', taskInput);
 
   if (!run?.defaultDatasetId) {
     throw new Error(`Source task run for batch ${idx + 1} did not return defaultDatasetId`);
