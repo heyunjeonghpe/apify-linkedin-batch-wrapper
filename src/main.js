@@ -179,3 +179,77 @@ const crawler = new PlaywrightCrawler({
                         ) || null;
 
                     const postAnchor = card.querySelector(
+                        'a.app-aware-link[href*="/posts/"], a.app-aware-link[href*="/feed/update/"]'
+                    );
+                    const postUrl = postAnchor?.getAttribute('href') || null;
+
+                    const imageEl = card.querySelector('img');
+                    const imageUrl = imageEl?.getAttribute('src') || null;
+
+                    const fullText = card.innerText || '';
+                    const isRepost =
+                        /reposted this|shared this|repost/i.test(fullText);
+
+                    return {
+                        authorName,
+                        text,
+                        headline,
+                        timestampRaw,
+                        postUrl,
+                        imageUrl,
+                        isRepost,
+                    };
+                });
+
+                return extracted.filter((item) => {
+                    if (!includeReposts && item.isRepost) return false;
+                    return Boolean(item.text || item.headline || item.postUrl);
+                });
+            }, { includeReposts });
+
+            collected = dedupePosts([...collected, ...posts]);
+
+            if (debug) {
+                log.info(`Collected ${collected.length} raw post(s) so far`, {
+                    profile: sourceProfile,
+                    scrollIndex: i + 1,
+                });
+            }
+
+            if (collected.length >= maxPostsPerProfile) break;
+
+            await page.mouse.wheel(0, 5000);
+            await page.waitForTimeout(2000);
+        }
+
+        const normalized = dedupePosts(
+            collected.slice(0, maxPostsPerProfile).map((item) => ({
+                sourceProfile,
+                authorName: item.authorName,
+                authorUrl: sourceProfile,
+                text: item.text || '',
+                headline: item.headline || item.text || '',
+                postUrl: normalizeUrl(item.postUrl),
+                postType: 'post',
+                timestamp: parseRelativeTimestamp(item.timestampRaw),
+                rawTimestamp: item.timestampRaw,
+                imageUrl: item.imageUrl,
+                raw: item,
+            }))
+        );
+
+        if (debug) {
+            log.info(`Pushing ${normalized.length} normalized post(s)`, {
+                profile: sourceProfile,
+            });
+        }
+
+        if (normalized.length > 0) {
+            await Actor.pushData(normalized);
+        }
+    },
+});
+
+await crawler.run(requests);
+
+await Actor.exit();
