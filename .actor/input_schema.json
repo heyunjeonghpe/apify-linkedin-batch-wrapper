@@ -1,6 +1,6 @@
 {
   "title": "LinkedIn Batch Wrapper Input",
-  "description": "Input for LinkedIn batch wrapper actor",
+  "description": "Input for self-contained LinkedIn scraping actor",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
@@ -13,42 +13,37 @@
       },
       "editor": "stringList"
     },
-    "batchSize": {
-      "title": "Batch Size",
-      "description": "Number of profiles per batch",
-      "type": "integer",
-      "default": 5
-    },
     "maxPostsPerProfile": {
       "title": "Max Posts Per Profile",
-      "description": "Maximum number of posts per profile",
+      "description": "Maximum number of posts to collect per profile",
       "type": "integer",
-      "default": 12
+      "default": 10
+    },
+    "maxScrolls": {
+      "title": "Max Scrolls",
+      "description": "Maximum number of scroll actions per profile page",
+      "type": "integer",
+      "default": 8
     },
     "includeReposts": {
       "title": "Include Reposts",
-      "description": "Include reposted content",
+      "description": "Whether to include reposted/shared content",
       "type": "boolean",
       "default": false
-    },
-    "onlyPosts": {
-      "title": "Only Posts",
-      "description": "Only include original posts",
-      "type": "boolean",
-      "default": true
-    },
-    "dedupeByPostUrl": {
-      "title": "Deduplicate Posts",
-      "description": "Remove duplicate posts",
-      "type": "boolean",
-      "default": true
     },
     "debug": {
       "title": "Debug Mode",
-      "description": "Enable debug logs",
+      "description": "Enable verbose logging",
       "type": "boolean",
       "default": false
+    },
+    "loginCookiesJson": {
+      "title": "LinkedIn Cookies JSON",
+      "description": "Optional exported LinkedIn cookies array as JSON string, used if the recent activity page requires authentication",
+      "type": "string",
+      "editor": "textarea"
     }
   },
   "required": ["profileUrls"]
 }
+``
