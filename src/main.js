@@ -21,9 +21,26 @@ if (!Array.isArray(profileUrls) || profileUrls.length === 0) {
 let cookies = [];
 if (loginCookiesJson) {
     try {
-        cookies = typeof loginCookiesJson === 'string'
+        const parsed = typeof loginCookiesJson === 'string'
             ? JSON.parse(loginCookiesJson)
             : loginCookiesJson;
+
+        cookies = parsed.map((cookie) => {
+            const normalized = {
+                name: cookie.name,
+                value: cookie.value,
+                domain: (cookie.domain || '.linkedin.com').replace(/^\.?www\./, '.'),
+                path: cookie.path || '/',
+                secure: Boolean(cookie.secure),
+                httpOnly: Boolean(cookie.httpOnly),
+            };
+
+            if (cookie.sameSite && ['Strict', 'Lax', 'None'].includes(cookie.sameSite)) {
+                normalized.sameSite = cookie.sameSite;
+            }
+
+            return normalized;
+        });
     } catch (err) {
         throw new Error(`loginCookiesJson is not valid JSON: ${err.message}`);
     }
@@ -111,10 +128,10 @@ const requests = profileUrls.map((profileUrl) => ({
 log.info(`Starting self-contained LinkedIn scrape for ${requests.length} profile(s).`);
 
 const crawler = new PlaywrightCrawler({
-    maxConcurrency: 2,
+    maxConcurrency: 1,
     requestHandlerTimeoutSecs: 180,
     navigationTimeoutSecs: 90,
-    maxRequestRetries: 1,
+    maxRequestRetries: 2,
 
     launchContext: {
         launchOptions: {
@@ -135,7 +152,7 @@ const crawler = new PlaywrightCrawler({
     async requestHandler({ page, request }) {
         const { sourceProfile } = request.userData;
 
-        await page.waitForTimeout(2500);
+        await page.waitForTimeout(5000);
 
         let collected = [];
 
@@ -221,7 +238,7 @@ const crawler = new PlaywrightCrawler({
             if (collected.length >= maxPostsPerProfile) break;
 
             await page.mouse.wheel(0, 5000);
-            await page.waitForTimeout(2000);
+            await page.waitForTimeout(3500);
         }
 
         const normalized = dedupePosts(
